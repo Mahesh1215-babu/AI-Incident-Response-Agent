@@ -11,7 +11,8 @@ import {
   LogOut, 
   Sun, 
   Moon, 
-  Cpu
+  Cpu,
+  GitCompare
 } from 'lucide-react';
 
 const Sidebar = () => {
@@ -22,6 +23,7 @@ const Sidebar = () => {
     { name: 'Analyze Incident', path: '/analyze', icon: Terminal },
     { name: 'Incident History', path: '/history', icon: History },
     { name: 'Memory Explorer', path: '/memory', icon: BrainCircuit },
+    { name: 'Memory Delta', path: '/memory-delta', icon: GitCompare },
     { name: 'Reports', path: '/reports', icon: BarChart3 },
   ];
 

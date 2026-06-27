@@ -5,10 +5,10 @@
   "scripts": {
     "install-all": "npm run install-frontend && npm run install-backend",
     "install-frontend": "cmd /c \"cd frontend && npm install\"",
-    "install-backend": "pip install -r backend/requirements.txt",
+    "install-backend": "backend\\venv\\Scripts\\pip install -r backend/requirements.txt",
     "dev": "concurrently --kill-others \"npm run dev:frontend\" \"npm run dev:backend\"",
     "dev:frontend": "cmd /c \"cd frontend && npm run dev\"",
-    "dev:backend": "python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload"
+    "dev:backend": "backend\\venv\\Scripts\\python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

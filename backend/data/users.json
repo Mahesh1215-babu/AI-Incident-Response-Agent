@@ -1,9 +1,0 @@
-[
-  {
-    "email": "mahesh@gmail.com",
-    "password": "bcrypt$$2b$12$R8.bkAzhlF7NMxYVzma0kuBs9KQnFJm6ac7iF1Shpobm5DuBU0nS6",
-    "role": "admin",
-    "created_at": "2026-06-26T15:42:20.148610",
-    "_id": "5ec412ae-aab0-48ba-b305-7e5b1a2fb9d0"
-  }
-]

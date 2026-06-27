@@ -1,16 +1,19 @@
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, EmailStr
 from typing import List, Optional, Dict, Any
-from datetime import datetime
 
 # --- Auth Schemas ---
+
+
 class UserSignup(BaseModel):
     email: EmailStr
     password: str
-    role: Optional[str] = "engineer" # engineer, admin
+    role: Optional[str] = "engineer"  # engineer, admin
+
 
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
 
 class UserResponse(BaseModel):
     id: str
@@ -18,29 +21,36 @@ class UserResponse(BaseModel):
     role: str
     created_at: str
 
+
 class Token(BaseModel):
     access_token: str
     token_type: str
     role: str
     email: str
 
+
 class TokenData(BaseModel):
     email: Optional[str] = None
     role: Optional[str] = None
 
 # --- Incident Analysis Schemas ---
+
+
 class IncidentCreate(BaseModel):
     title: str
     logs: str
-    severity: str # Low, Medium, High, Critical
-    environment: str # Development, Testing, Production, Cloud, On-premise
+    severity: str  # Low, Medium, High, Critical
+    environment: str  # Development, Testing, Production, Cloud, On-premise
+    contains_pii: bool = False
+
 
 class FeedbackSubmit(BaseModel):
     incident_id: str
     final_resolution: str
     resolution_time_minutes: int
     engineer_notes: Optional[str] = ""
-    is_success: bool # success or failure
+    is_success: bool  # success or failure
+
 
 class IncidentResponse(BaseModel):
     id: str
@@ -48,10 +58,10 @@ class IncidentResponse(BaseModel):
     logs: str
     severity: str
     environment: str
-    status: str # Open, Resolved
+    status: str  # Open, Resolved
     created_by: str
     created_at: str
-    
+
     # AI generated analysis
     summary: Optional[str] = None
     root_cause: Optional[str] = None
@@ -60,16 +70,19 @@ class IncidentResponse(BaseModel):
     recommended_resolution: Optional[List[str]] = []
     preventive_measures: Optional[List[str]] = []
     estimated_resolution_time: Optional[str] = None
-    
+
     # Cascadeflow selection meta
     model_used: Optional[str] = None
     routing_reason: Optional[str] = None
     routing_cost: Optional[float] = 0.0
     routing_latency: Optional[float] = 0.0
-    
+    cascaded: Optional[bool] = False
+    draft_accepted: Optional[bool] = False
+    complexity: Optional[str] = None
+
     # Hindsight memories list
     matched_memories: Optional[List[Dict[str, Any]]] = []
-    
+
     # Feedback / resolution data
     final_resolution: Optional[str] = None
     resolution_time_minutes: Optional[int] = None
@@ -78,6 +91,8 @@ class IncidentResponse(BaseModel):
     resolved_at: Optional[str] = None
 
 # --- Hindsight Memory Schemas ---
+
+
 class MemoryResponse(BaseModel):
     id: str
     incident_id: str
@@ -93,6 +108,8 @@ class MemoryResponse(BaseModel):
     timestamp: str
 
 # --- Cascadeflow Audit Logs ---
+
+
 class AuditLogResponse(BaseModel):
     id: str
     incident_id: Optional[str] = None
@@ -108,11 +125,14 @@ class AuditLogResponse(BaseModel):
     log_size: int
 
 # --- Reports & Analytics ---
+
+
 class RepeatedIncident(BaseModel):
     pattern: str
     count: int
     severity: str
     last_occurred: str
+
 
 class ReportDashboard(BaseModel):
     total_incidents: int
@@ -121,17 +141,17 @@ class ReportDashboard(BaseModel):
     critical_incidents: int
     average_resolution_time_minutes: float
     recent_activity: List[Dict[str, Any]]
-    
+
     # AI/Cascadeflow stats
     model_usage: Dict[str, int]
     cascadeflow_cost_savings: float
     total_tokens_used: int
     total_cost: float
-    
+
     # Hindsight stats
     total_memories: int
     memory_recall_count: int
-    
+
     # Failure trends
-    common_failures: List[Dict[str, Any]] # e.g. [{"category": "DB", "count": 10}]
-    weekly_breakdown: List[Dict[str, Any]] # e.g. [{"week": "Week 1", "resolved": 5, "unresolved": 2}]
+    common_failures: List[Dict[str, Any]]  # e.g. [{"category": "DB", "count": 10}]
+    weekly_breakdown: List[Dict[str, Any]]  # e.g. [{"week": "Week 1", "resolved": 5, "unresolved": 2}]

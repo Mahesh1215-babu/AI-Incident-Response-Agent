@@ -1,361 +1,169 @@
 import os
-import asyncio
-import time
 import json
-import random
-import httpx
-from datetime import datetime
-from typing import Dict, Any, Tuple
+from typing import Dict, Any
 from dotenv import load_dotenv
-from backend.database.db import get_db_collection
+
+from cascadeflow import CascadeAgent, ModelConfig
+from cascadeflow.telemetry import (
+    BudgetConfig, CostTracker, EnforcementCallbacks, EnforcementContext,
+    EnforcementAction, graceful_degradation
+)
 
 load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 
-# Hardcoded model configurations & pricing (per 1,000,000 tokens)
-MODEL_CONFIGS = {
-    "llama-3.1-8b-instant": {
-        "provider": "groq",
-        "input_cost_per_m": 0.05,
-        "output_cost_per_m": 0.08,
-        "display_name": "Llama 3.1 8B (Groq)"
-    },
-    "mixtral-8x7b-32768": {
-        "provider": "groq",
-        "input_cost_per_m": 0.24,
-        "output_cost_per_m": 0.24,
-        "display_name": "Mixtral 8x7B (Groq)"
-    },
-    "llama-3.3-70b-versatile": {
-        "provider": "groq",
-        "input_cost_per_m": 0.59,
-        "output_cost_per_m": 0.79,
-        "display_name": "Llama 3.3 70B (Groq)"
-    },
-    "deepseek-r1-distill-llama-70b": {
-        "provider": "groq",
-        "input_cost_per_m": 0.59,
-        "output_cost_per_m": 0.79,
-        "display_name": "DeepSeek R1 70B (Groq)"
-    },
-    "gpt-4o-mini": {
-        "provider": "openai",
-        "input_cost_per_m": 0.15,
-        "output_cost_per_m": 0.60,
-        "display_name": "GPT-4o Mini (OpenAI)"
-    },
-    "gpt-4o": {
-        "provider": "openai",
-        "input_cost_per_m": 2.50,
-        "output_cost_per_m": 10.00,
-        "display_name": "GPT-4o (OpenAI)"
-    }
-}
+# Initialize tracker globally for the session
+global_tracker = CostTracker(user_budgets={"default": BudgetConfig(daily=10.0)})
+global_callbacks = EnforcementCallbacks(verbose=True)
+global_callbacks.register(graceful_degradation)
+
 
 class CascadeflowRouter:
     @classmethod
-    def determine_route(cls, logs: str, severity: str) -> Tuple[str, str]:
-        """
-        Determines the optimal model and provides the reason based on log size and severity.
-        """
-        char_count = len(logs)
-        line_count = len(logs.splitlines())
-        severity_upper = severity.upper()
-        
-        # Decide provider based on available key
-        has_groq = bool(GROQ_API_KEY)
-        has_openai = bool(OPENAI_API_KEY)
-        
-        # Default fallback is groq, but if only openai is present, route to openai
-        provider = "groq" if has_groq or not has_openai else "openai"
-        
-        if char_count > 15000 or line_count > 200:
-            if provider == "groq":
-                return "llama-3.3-70b-versatile", f"Large log size ({char_count} chars, {line_count} lines) requires high-context powerful model."
-            else:
-                return "gpt-4o", f"Large log size ({char_count} chars, {line_count} lines) requires high-context robust model."
-                
-        if severity_upper == "CRITICAL":
-            if provider == "groq":
-                return "deepseek-r1-distill-llama-70b", "Critical incident severity requires advanced reasoning model for deep diagnostic analysis."
-            else:
-                return "gpt-4o", "Critical incident severity requires advanced model for deep diagnostic analysis."
-                
-        if severity_upper == "HIGH":
-            if provider == "groq":
-                return "llama-3.3-70b-versatile", "High severity incident requires robust model with thorough classification."
-            else:
-                return "gpt-4o-mini", "High severity incident routed to cost-efficient standard model."
-                
-        # Low/Medium and small log files
-        if provider == "groq":
-            return "llama-3.1-8b-instant", "Simple incident and small log size. Rerouted to fast, cost-efficient small model."
-        else:
-            return "gpt-4o-mini", "Simple incident and small log size. Rerouted to fast, cost-efficient mini model."
+    def _run_simulation_mode(cls, title: str, logs: str, severity: str, environment: str, hindsight_context: str) -> Dict[str, Any]:
+        """Fallback when no API keys are provided."""
+        return {
+            "summary": "SIMULATION MODE: Database connection pool exhaustion detected.",
+            "root_cause": "Max connections reached due to unclosed sessions.",
+            "confidence_score": 0.95,
+            "affected_components": ["Database", "API Gateway"],
+            "recommended_resolution": ["Increase max_connections", "Patch connection leak in service"],
+            "preventive_measures": ["Add connection pool monitoring"],
+            "estimated_resolution_time": "15m",
+            "model_used": "simulation-fallback",
+            "routing_reason": "No API keys provided.",
+            "routing_cost": 0.0,
+            "routing_latency": 0.1,
+            "cascaded": False,
+            "draft_accepted": False,
+            "complexity": "low"
+        }
 
     @classmethod
-    async def route_and_execute(cls, title: str, logs: str, severity: str, environment: str, hindsight_context: str) -> Dict[str, Any]:
-        """
-        Routes the request to the optimal model, calls the provider (or mock in simulation),
-        saves the audit log, and returns the parsed result.
-        """
-        model_name, reason = cls.determine_route(logs, severity)
-        config = MODEL_CONFIGS[model_name]
-        provider = config["provider"]
-        
-        start_time = time.time()
-        
-        # Check if keys are available
-        use_simulation = True
-        if provider == "groq" and GROQ_API_KEY:
-            use_simulation = False
-        elif provider == "openai" and OPENAI_API_KEY:
-            use_simulation = False
-            
+    async def route_and_execute(cls, title: str, logs: str, severity: str, environment: str, hindsight_context: str, contains_pii: bool = False, current_user_id: str = "default_user") -> Dict[str, Any]:
+        has_groq = bool(GROQ_API_KEY)
+        has_openai = bool(OPENAI_API_KEY)
+
+        if not has_groq and not has_openai:
+            return cls._run_simulation_mode(title, logs, severity, environment, hindsight_context)
+
+        char_count = len(logs)
+        severity_upper = severity.upper()
+
+        models = []
+
+        # Base Model Configs
+        groq_cheap = ModelConfig(name="llama-3.1-8b-instant", provider="groq", cost=0.00005, quality_threshold=0.7)
+        groq_expensive = ModelConfig(name="llama-3.3-70b-versatile", provider="groq",
+                                     cost=0.00059, quality_threshold=0.95)
+        openai_cheap = ModelConfig(name="gpt-4o-mini", provider="openai", cost=0.00015, quality_threshold=0.75)
+        openai_expensive = ModelConfig(name="gpt-4o", provider="openai", cost=0.0025, quality_threshold=0.98)
+
+        # Check compliance
+        if contains_pii:
+            # Compliance Gating: Force routing to strict allow-listed models only
+            # e.g., dropping cheap tiers to ensure safer handling
+            if has_groq:
+                models.append(groq_expensive)
+            elif has_openai:
+                models.append(openai_expensive)
+            routing_reason = "Compliance Gating (PII detected): Forced verifier tier model."
+        else:
+            # Standard Severity/Size Routing
+            is_large = char_count > 15000
+            is_critical = severity_upper == "CRITICAL"
+            is_high = severity_upper == "HIGH"
+
+            # Check budget
+            current_cost = global_tracker.get_cost(current_user_id)
+            budget_limit = 10.0
+            pct_used = current_cost / budget_limit if budget_limit else 0.0
+            action = global_callbacks.check(EnforcementContext(
+                user_id=current_user_id, user_tier="default",
+                current_cost=current_cost, budget_limit=budget_limit,
+                budget_used_pct=pct_used, budget_exceeded=(pct_used >= 1.0)
+            ))
+
+            force_cheap = action in (EnforcementAction.WARN, EnforcementAction.BLOCK)
+
+            if is_critical or is_large:
+                if force_cheap:
+                    models = [groq_cheap] if has_groq else [openai_cheap]
+                    routing_reason = "Budget limit strict: Forced cheap tier despite high severity."
+                else:
+                    models = [groq_expensive] if has_groq else [openai_expensive]
+                    routing_reason = f"{'Large log size' if is_large else 'Critical severity'}: Forced verifier tier model."
+            elif is_high:
+                if has_groq:
+                    groq_cheap.quality_threshold = 0.90  # high threshold means likely to escalate
+                    models = [groq_cheap, groq_expensive]
+                else:
+                    openai_cheap.quality_threshold = 0.90
+                    models = [openai_cheap, openai_expensive]
+                routing_reason = "High severity: Cascade agent with high draft threshold."
+            else:
+                if has_groq:
+                    groq_cheap.quality_threshold = 0.60  # Accept cheap draft easily
+                    models = [groq_cheap, groq_expensive]
+                else:
+                    openai_cheap.quality_threshold = 0.60
+                    models = [openai_cheap, openai_expensive]
+                routing_reason = "Low/Medium severity: Cascade agent with low draft threshold."
+
+        agent = CascadeAgent(models=models)
+
         system_prompt = (
             "You are an expert DevOps and Site Reliability Engineer (SRE) assistant.\n"
             "Analyze the production incident logs and write a diagnostic report in JSON format.\n"
             "You must return ONLY a raw JSON object, without any markdown formatting wrappers or conversational text.\n"
-            "The JSON structure must match:\n"
-            "{\n"
-            '  "summary": "Short incident summary",\n'
-            '  "root_cause": "Detailed root cause analysis",\n'
-            '  "confidence_score": 95.5,\n'
-            '  "affected_components": ["API Gateway", "Database Pool"],\n'
-            '  "recommended_resolution": ["Action 1", "Action 2"],\n'
-            '  "preventive_measures": ["Measure 1", "Measure 2"],\n'
-            '  "estimated_resolution_time": "30 minutes"\n'
-            "}"
+            "Required keys: summary (string), root_cause (string), confidence_score (float 0.0-1.0), "
+            "affected_components (list of strings), recommended_resolution (list of strings), "
+            "preventive_measures (list of strings), estimated_resolution_time (string, e.g. '30m')."
         )
-        
-        user_prompt = (
+
+        incident_prompt = (
             f"Title: {title}\n"
             f"Severity: {severity}\n"
-            f"Environment: {environment}\n\n"
-            f"--- HINDSIGHT PERSISTENT MEMORY CONTEXT ---\n"
-            f"{hindsight_context or 'No similar previous incidents found.'}\n\n"
-            f"--- SYSTEM LOGS ---\n"
-            f"{logs[:10000]}\n" # cap log to fit context cleanly
+            f"Environment: {environment}\n"
+            f"{hindsight_context}\n"
+            f"Logs:\n{logs}\n\n"
+            f"Return JSON only."
         )
-        
-        analysis_data = {}
-        input_tokens = 0
-        output_tokens = 0
-        
-        if use_simulation:
-            # Simulate latency and run mock generator
-            await asyncio.sleep(random.uniform(0.6, 1.5))
-            analysis_data = cls._generate_mock_analysis(title, logs, severity, hindsight_context)
-            # Estimate token count based on prompts
-            input_tokens = len(system_prompt.split()) + len(user_prompt.split()) + 50
-            output_tokens = len(json.dumps(analysis_data).split()) + 30
-        else:
-            try:
-                if provider == "groq":
-                    analysis_data, input_tokens, output_tokens = await cls._execute_groq(model_name, system_prompt, user_prompt)
-                else:
-                    analysis_data, input_tokens, output_tokens = await cls._execute_openai(model_name, system_prompt, user_prompt)
-            except Exception as e:
-                print(f"AI API call failed: {e}. Falling back to simulation mode.")
-                analysis_data = cls._generate_mock_analysis(title, logs, severity, hindsight_context)
-                input_tokens = 1200
-                output_tokens = 450
-                
-        latency = round(time.time() - start_time, 3)
-        
-        # Calculate cost
-        in_cost = (input_tokens / 1000000.0) * config["input_cost_per_m"]
-        out_cost = (output_tokens / 1000000.0) * config["output_cost_per_m"]
-        total_cost = round(in_cost + out_cost, 6)
-        
-        # Save Audit Log
-        audit_col = get_db_collection("audit_logs")
-        audit_entry = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "model_selected": config["display_name"],
-            "reason": reason,
-            "estimated_cost": total_cost,
-            "latency": latency,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-            "severity": severity,
-            "log_size": len(logs)
-        }
-        await audit_col.insert_one(audit_entry)
-        
-        # Attach routing audit data to result
-        analysis_data["model_used"] = config["display_name"]
-        analysis_data["routing_reason"] = reason
-        analysis_data["routing_cost"] = total_cost
-        analysis_data["routing_latency"] = latency
-        
-        return analysis_data
 
-    @classmethod
-    async def _execute_groq(cls, model: str, system_prompt: str, user_prompt: str) -> Tuple[Dict[str, Any], int, int]:
-        url = "https://api.groq.com/openai/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            "response_format": {"type": "json_object"},
-            "temperature": 0.2
-        }
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            res = await client.post(url, headers=headers, json=data)
-            res.raise_for_status()
-            res_json = res.json()
-            
-            content = res_json["choices"][0]["message"]["content"]
-            usage = res_json.get("usage", {})
-            in_t = usage.get("prompt_tokens", 0)
-            out_t = usage.get("completion_tokens", 0)
-            
-            parsed = json.loads(content)
-            return parsed, in_t, out_t
+        try:
+            # Run the agent
+            result = await agent.run(system_prompt + "\n\n" + incident_prompt, max_tokens=1000)
 
-    @classmethod
-    async def _execute_openai(cls, model: str, system_prompt: str, user_prompt: str) -> Tuple[Dict[str, Any], int, int]:
-        url = "https://api.openai.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            "response_format": {"type": "json_object"},
-            "temperature": 0.2
-        }
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            res = await client.post(url, headers=headers, json=data)
-            res.raise_for_status()
-            res_json = res.json()
-            
-            content = res_json["choices"][0]["message"]["content"]
-            usage = res_json.get("usage", {})
-            in_t = usage.get("prompt_tokens", 0)
-            out_t = usage.get("completion_tokens", 0)
-            
-            parsed = json.loads(content)
-            return parsed, in_t, out_t
+            # Record cost
+            global_tracker.add_cost(
+                model=result.model_used, provider=models[0].provider,
+                tokens=getattr(result, 'total_tokens', 100),
+                cost=result.total_cost,
+                user_id=current_user_id, user_tier="default"
+            )
 
-    @classmethod
-    def _generate_mock_analysis(cls, title: str, logs: str, severity: str, hindsight_context: str) -> Dict[str, Any]:
-        """
-        Fascinating mock analyzer that creates dynamic, content-aware diagnostic reports
-        matching the logs uploaded by the user.
-        """
-        logs_lower = logs.lower()
-        title_lower = title.lower()
-        
-        # Detect typical issues
-        if "out of memory" in logs_lower or "oom" in logs_lower or "mem" in title_lower:
-            summary = "Server running out of system memory, causing services to be terminated by OOM killer."
-            root_cause = "Memory leak identified in Node.js server. Memory heap size continuously increased until limit reached, leading to process crash."
-            confidence = 88.5
-            components = ["Node.js Server", "RAM Allocation"]
-            resolution = [
-                "Restart the node service to free system heap memory.",
-                "Increase container memory limit in kubernetes values.yaml configuration.",
-                "Review memory profiler profiles to inspect closures and global variable leaks."
-            ]
-            preventive = [
-                "Implement a Node.js process monitor (PM2/Kubernetes liveness probe) that restarts on high heap usage.",
-                "Setup memory threshold alerts at 85% utilization.",
-                "Add heap-dump profiling in testing environment."
-            ]
-            duration = "15 minutes"
-            
-        elif "connection pool" in logs_lower or "postgresql" in logs_lower or "db" in title_lower or "mysql" in logs_lower:
-            summary = "Database connection pool exhaustion leading to server request timeouts."
-            root_cause = "Database client connection pool limit exceeded. Unclosed database connections inside asynchronous loops have locked resources."
-            confidence = 94.0
-            components = ["PostgreSQL Database", "Backend Connection Pool Manager"]
-            resolution = [
-                "Increase max connections in database configuration pool parameters.",
-                "Audit API routes to ensure database sessions are correctly disposed using context managers.",
-                "Restart PostgreSQL service to clear hanging idle transaction locks."
-            ]
-            preventive = [
-                "Implement connection pool health alerts.",
-                "Reduce idle connection timeout to 30 seconds.",
-                "Ensure robust error-handling retry blocks are enabled."
-            ]
-            duration = "10 minutes"
-            
-        elif "redis" in logs_lower or "cache" in title_lower:
-            summary = "Redis cache memory limit exceeded."
-            root_cause = "Redis key evictions configured incorrectly. Cache eviction policy set to volatile-lru, but keys do not have TTL timeouts set."
-            confidence = 91.0
-            components = ["Redis Cluster", "Cache Middleware"]
-            resolution = [
-                "Set maxmemory eviction policy to allkeys-lru in redis.conf.",
-                "Increase maximum memory capacity of Redis instance.",
-                "Flush expired sessions cache key database."
-            ]
-            preventive = [
-                "Enforce strict TTL values on all cached response objects.",
-                "Separate session data store from static content cache storage."
-            ]
-            duration = "5 minutes"
-            
-        elif "auth" in logs_lower or "unauthorized" in logs_lower or "token" in logs_lower or "jwt" in logs_lower:
-            summary = "Authentication system token signature validation failure."
-            root_cause = "Authentication service failed to decrypt token signatures due to missing or invalid cryptographical JWT secret key variables."
-            confidence = 85.0
-            components = ["Auth Gateway", "JWT Helper Class"]
-            resolution = [
-                "Ensure JWT_SECRET environment variables are correctly populated in production deployments.",
-                "Verify signature validation algorithms match client token outputs (HS256).",
-                "Clean active local storage cookies and re-authenticate."
-            ]
-            preventive = [
-                "Incorporate environment config verification tests in CI/CD pipeline.",
-                "Enable secure fallback keys when configuration is not defined."
-            ]
-            duration = "20 minutes"
-            
-        else:
-            # General fallback mock
-            summary = f"Unclassified incident related to: {title}"
-            root_cause = f"System error caught in log stream. Analysis indicates unexpected exception handling block crashed core handlers."
-            confidence = 72.0
-            components = ["Core Application Module", "Error Handling Exception Block"]
-            resolution = [
-                "Inspect crash traceback logs to find exception source files.",
-                "Rollback the latest deployment release code to stable tag.",
-                "Verify environmental configurations are in place."
-            ]
-            preventive = [
-                "Add additional unit tests verifying border case exceptions.",
-                "Setup real-time application profiling alerts."
-            ]
-            duration = "30 minutes"
+            # Parse output
+            output_text = result.content.strip()
+            if output_text.startswith("```json"):
+                output_text = output_text[7:]
+            if output_text.endswith("```"):
+                output_text = output_text[:-3]
 
-        # Integrate Hindsight memories info if present
-        if hindsight_context and "found similar" in hindsight_context.lower():
-            root_cause += " [Hindsight Recall: This aligns with past resolutions that succeeded. Recommending resolutions matching previous incident history.]"
-            confidence = min(confidence + 5.0, 99.0)
-            
-        return {
-            "summary": summary,
-            "root_cause": root_cause,
-            "confidence_score": confidence,
-            "affected_components": components,
-            "recommended_resolution": resolution,
-            "preventive_measures": preventive,
-            "estimated_resolution_time": duration
-        }
+            parsed = json.loads(output_text.strip())
+
+            parsed["model_used"] = result.model_used
+            parsed["routing_reason"] = routing_reason
+            parsed["routing_cost"] = result.total_cost
+            parsed["routing_latency"] = getattr(result, 'latency_ms', 0) / 1000.0
+            parsed["cascaded"] = getattr(result, 'cascaded', False)
+            parsed["draft_accepted"] = getattr(result, 'draft_accepted', False)
+            parsed["complexity"] = getattr(result, 'complexity', "unknown")
+
+            return parsed
+
+        except Exception as e:
+            print(f"Cascadeflow Agent Error: {e}")
+            # Fallback for hackathon resilience
+            return cls._run_simulation_mode(title, logs, severity, environment, hindsight_context)

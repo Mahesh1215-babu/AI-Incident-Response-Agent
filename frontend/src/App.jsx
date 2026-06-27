@@ -15,6 +15,7 @@ import Dashboard from './pages/Dashboard';
 import AnalyzeIncident from './pages/AnalyzeIncident';
 import IncidentHistory from './pages/IncidentHistory';
 import MemoryExplorer from './pages/MemoryExplorer';
+import MemoryDelta from './pages/MemoryDelta';
 import Reports from './pages/Reports';
 import AdminPanel from './pages/AdminPanel';
 
@@ -59,6 +60,7 @@ function App() {
             <Route path="/analyze" element={<AnalyzeIncident />} />
             <Route path="/history" element={<IncidentHistory />} />
             <Route path="/memory" element={<MemoryExplorer />} />
+            <Route path="/memory-delta" element={<MemoryDelta />} />
             <Route path="/reports" element={<Reports />} />
             
             {/* Admin Restricted Endpoint */}

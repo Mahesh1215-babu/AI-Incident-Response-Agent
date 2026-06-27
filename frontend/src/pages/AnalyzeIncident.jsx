@@ -27,6 +27,7 @@ const AnalyzeIncident = () => {
   const [logs, setLogs] = useState('');
   const [severity, setSeverity] = useState('High');
   const [environment, setEnvironment] = useState('Production');
+  const [containsPii, setContainsPii] = useState(false);
   
   // App states
   const [analyzing, setAnalyzing] = useState(false);
@@ -75,7 +76,7 @@ const AnalyzeIncident = () => {
     setAnalyzing(true);
 
     try {
-      const response = await incidentsAPI.analyze(title, logs, severity, environment);
+      const response = await incidentsAPI.analyze(title, logs, severity, environment, containsPii);
       setResult(response);
       
       // Auto populate feedback template with recommended first action
@@ -172,6 +173,20 @@ const AnalyzeIncident = () => {
                   <option value="On-premise">On-premise</option>
                 </select>
               </div>
+            </div>
+
+            {/* Compliance Mode Toggle */}
+            <div className="flex items-center gap-3 p-3 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
+              <input
+                type="checkbox"
+                id="pii-toggle"
+                checked={containsPii}
+                onChange={(e) => setContainsPii(e.target.checked)}
+                className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 bg-slate-800 border-slate-700"
+              />
+              <label htmlFor="pii-toggle" className="text-sm font-medium text-slate-700 dark:text-slate-300 select-none">
+                Contains Customer PII (Compliance Mode)
+              </label>
             </div>
 
             {/* File Upload Parser */}

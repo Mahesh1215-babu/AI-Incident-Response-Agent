@@ -46,8 +46,8 @@ export const incidentsAPI = {
     });
     return res.data;
   },
-  analyze: async (title, logs, severity, environment) => {
-    const res = await api.post('/analyze', { title, logs, severity, environment });
+  analyze: async (title, logs, severity, environment, contains_pii = false) => {
+    const res = await api.post('/analyze', { title, logs, severity, environment, contains_pii });
     return res.data;
   },
   getIncidents: async (params = {}) => {
@@ -74,6 +74,12 @@ export const memoryAPI = {
       params: { q, filter_type: filterType }
     });
     return res.data;
+  },
+  reflect: async (query) => {
+    const res = await api.get('/memory/reflect', {
+      params: { query }
+    });
+    return res.data;
   }
 };
 
@@ -84,6 +90,16 @@ export const reportsAPI = {
   },
   getAdminAnalytics: async () => {
     const res = await api.get('/admin/analytics');
+    return res.data;
+  },
+  getMemoryDelta: async (id1, id2) => {
+    const res = await api.get('/reports/memory-delta', {
+      params: { id1, id2 }
+    });
+    return res.data;
+  },
+  testWebhook: async (payload) => {
+    const res = await api.post('/integrations/webhook-test', payload);
     return res.data;
   }
 };

@@ -65,6 +65,47 @@ Before calling any AI model, cascadeflow evaluates the request:
 
 ---
 
+## 🧠 Hindsight Memory Setup
+
+To leverage Hindsight's persistent semantic memory features, you must configure a connection to a Hindsight server. The project supports two modes:
+
+### Option A — Self-Hosted via Docker (Local, Offline-First)
+No registration or API keys are required to run locally. Run the official Hindsight container in your terminal (ensure Docker is installed and running):
+
+```bash
+# Set your LLM API Key (used internally by Hindsight for key fact extraction/summarization)
+export OPENAI_API_KEY=your-sk-key-here
+
+# Run Hindsight container
+docker run -it --pull always --name hindsight --restart unless-stopped \
+  -p 8888:8888 -p 9999:9999 \
+  -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
+  -v $HOME/.hindsight-docker:/home/hindsight/.pg0 \
+  ghcr.io/vectorize-io/hindsight:latest
+```
+
+* The Hindsight API will be exposed locally at `http://localhost:8888`.
+* You can access the Hindsight Web UI / Control Plane at `http://localhost:9999`.
+
+### Option B — Hindsight Cloud (Hosted SaaS)
+1. Sign up for a free account at [Hindsight Cloud](https://ui.hindsight.vectorize.io/signup).
+2. Go to the **Connect** page and generate an API key.
+3. Configure `.env` with the cloud endpoint and your API key:
+   ```dotenv
+   HINDSIGHT_BASE_URL=https://api.hindsight.vectorize.io
+   HINDSIGHT_API_KEY=your_hindsight_api_key_here
+   ```
+
+---
+
+> [!IMPORTANT]
+> **Understanding the Two-Model Distinction**
+> It is easy to conflate the models used in this architecture. Note that:
+> 1. **`HINDSIGHT_API_LLM_MODEL`**: This is Hindsight's own internal reasoning model (e.g. OpenAI GPT-4o-mini or similar) configured inside the Docker container environment or the cloud panel. It is used *exclusively* by Hindsight to structure memories, extract facts during `.retain()`, and synthesize reflections.
+> 2. **Cascadeflow Models** (e.g. `llama-3.3-70b`, `gpt-4o`): These are the models that the `CascadeAgent` runs at runtime to evaluate the incident logs, perform diagnostics, and recommend resolutions. They are configured via `GROQ_API_KEY` and `OPENAI_API_KEY` in the application environment.
+
+---
+
 ## 📦 Tech Stack
 
 **Backend**

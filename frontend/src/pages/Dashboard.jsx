@@ -67,6 +67,13 @@ const Dashboard = () => {
       }
     };
     fetchDashboardData();
+    
+    // Live Cost Ticker Polling (every 10 seconds)
+    const interval = setInterval(() => {
+      fetchDashboardData();
+    }, 10000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   if (loading) {
@@ -253,15 +260,21 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Cascadeflow routing stat */}
+        {/* Cascadeflow routing stat - Live Ticker */}
         <div className="flex gap-4 items-start relative z-10 border-r border-slate-800/80 pr-4 last:border-0">
           <div className="p-3 bg-cyan-500/20 text-cyan-400 rounded-xl animate-pulse">
             <Cpu className="w-5 h-5" />
           </div>
           <div>
-            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">cascadeflow Optimization</h4>
-            <p className="text-lg font-bold text-white mt-0.5">${data.cascadeflow_cost_savings} Saved</p>
-            <p className="text-[10px] text-slate-500 mt-1">Tokens routed: {data.total_tokens_used.toLocaleString()}</p>
+            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Live cascadeflow Telemetry</h4>
+            <div className="flex items-center gap-2 mt-0.5">
+               <p className="text-xl font-bold text-white">${data.cascadeflow_cost_savings?.toFixed(4) || "0.0000"}</p>
+               <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-bold uppercase tracking-wider animate-pulse">Saved</span>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              Live telemetry vs max-tier baseline
+            </p>
           </div>
         </div>
 

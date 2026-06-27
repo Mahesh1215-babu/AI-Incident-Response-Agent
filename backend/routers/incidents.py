@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from datetime import datetime
 from typing import List, Optional
 from bson import ObjectId
@@ -9,6 +9,7 @@ from backend.cascade.cascadeflow import CascadeflowRouter
 from backend.utils.helpers import get_current_user_from_token, get_admin_user
 
 router = APIRouter(tags=["Incidents"])
+
 
 @router.post("/upload-log")
 async def upload_log(
@@ -34,6 +35,7 @@ async def upload_log(
             detail=f"Failed to read file: {e}"
         )
 
+
 @router.post("/analyze", response_model=IncidentResponse)
 async def analyze_incident(
     incident_data: IncidentCreate,
@@ -47,14 +49,14 @@ async def analyze_incident(
     4. Store incident record.
     """
     incidents_col = get_db_collection("incidents")
-    
+
     # 1. Search previous memories using Hindsight Engine
     similar_memories = await HindsightMemoryEngine.search_similar_memories(
         title=incident_data.title,
         logs=incident_data.logs,
         limit=3
     )
-    
+
     # 2. Format memories context for AI prompt
     memory_context = ""
     if similar_memories:
@@ -67,16 +69,18 @@ async def analyze_incident(
                 f"  Resolution success rate: {mem.get('is_success')}\n"
                 f"  Engineer Notes: {mem.get('engineer_notes', 'N/A')}\n"
             )
-            
+
     # 3. Call Cascadeflow routing and run analysis
     analysis = await CascadeflowRouter.route_and_execute(
         title=incident_data.title,
         logs=incident_data.logs,
         severity=incident_data.severity,
         environment=incident_data.environment,
-        hindsight_context=memory_context
+        hindsight_context=memory_context,
+        contains_pii=incident_data.contains_pii,
+        current_user_id=current_user["email"]
     )
-    
+
     # 4. Insert incident into DB
     new_incident = {
         "title": incident_data.title,
@@ -86,7 +90,7 @@ async def analyze_incident(
         "status": "Open",
         "created_by": current_user["email"],
         "created_at": datetime.utcnow().isoformat(),
-        
+
         # AI output
         "summary": analysis.get("summary"),
         "root_cause": analysis.get("root_cause"),
@@ -95,21 +99,25 @@ async def analyze_incident(
         "recommended_resolution": analysis.get("recommended_resolution", []),
         "preventive_measures": analysis.get("preventive_measures", []),
         "estimated_resolution_time": analysis.get("estimated_resolution_time"),
-        
+
         # Cascadeflow routing detail
         "model_used": analysis.get("model_used"),
         "routing_reason": analysis.get("routing_reason"),
         "routing_cost": analysis.get("routing_cost", 0.0),
         "routing_latency": analysis.get("routing_latency", 0.0),
-        
+        "cascaded": analysis.get("cascaded", False),
+        "draft_accepted": analysis.get("draft_accepted", False),
+        "complexity": analysis.get("complexity", "unknown"),
+
         # Hindsight results
         "matched_memories": similar_memories
     }
-    
+
     res = await incidents_col.insert_one(new_incident)
     new_incident["id"] = str(res.inserted_id)
-    
+
     return new_incident
+
 
 @router.get("/incidents", response_model=List[IncidentResponse])
 async def get_incidents(
@@ -124,7 +132,7 @@ async def get_incidents(
     """
     incidents_col = get_db_collection("incidents")
     query = {}
-    
+
     if search:
         query["$or"] = [
             {"title": {"$regex": search, "$options": "i"}},
@@ -137,14 +145,15 @@ async def get_incidents(
         query["environment"] = environment
     if status and status != "All":
         query["status"] = status
-        
+
     cursor = incidents_col.find(query).sort("created_at", -1)
     items = await cursor.to_list(100)
-    
+
     # Map _id object/string to id
     for item in items:
         item["id"] = str(item["_id"])
     return items
+
 
 @router.get("/incident/{id}", response_model=IncidentResponse)
 async def get_incident(
@@ -152,44 +161,46 @@ async def get_incident(
     current_user: dict = Depends(get_current_user_from_token)
 ):
     incidents_col = get_db_collection("incidents")
-    
+
     # Try finding by String ID or ObjectId
     query = {"_id": id}
     item = await incidents_col.find_one(query)
-    
+
     if not item and ObjectId.is_valid(id):
         item = await incidents_col.find_one({"_id": ObjectId(id)})
-        
+
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Incident report not found."
         )
-        
+
     item["id"] = str(item["_id"])
     return item
+
 
 @router.delete("/incident/{id}")
 async def delete_incident(
     id: str,
-    current_user: dict = Depends(get_admin_user) # Only admins can delete incidents
+    current_user: dict = Depends(get_admin_user)  # Only admins can delete incidents
 ):
     incidents_col = get_db_collection("incidents")
-    
+
     # Match query support
     query = {"_id": id}
     res = await incidents_col.delete_one(query)
-    
+
     if res.deleted_count == 0 and ObjectId.is_valid(id):
         res = await incidents_col.delete_one({"_id": ObjectId(id)})
-        
+
     if res.deleted_count == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Incident report not found or could not be deleted."
         )
-        
+
     return {"message": "Incident report deleted successfully"}
+
 
 @router.post("/feedback", response_model=IncidentResponse)
 async def submit_feedback(
@@ -202,20 +213,20 @@ async def submit_feedback(
     """
     incidents_col = get_db_collection("incidents")
     incident_id = feedback.incident_id
-    
+
     # Locate incident
     query = {"_id": incident_id}
     incident = await incidents_col.find_one(query)
     if not incident and ObjectId.is_valid(incident_id):
         query = {"_id": ObjectId(incident_id)}
         incident = await incidents_col.find_one(query)
-        
+
     if not incident:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Incident report not found."
         )
-        
+
     # Mark resolved and update status
     update_data = {
         "status": "Resolved",
@@ -225,14 +236,14 @@ async def submit_feedback(
         "is_success": feedback.is_success,
         "resolved_at": datetime.utcnow().isoformat()
     }
-    
+
     await incidents_col.update_one(query, {"$set": update_data})
-    
+
     # Fetch updated incident
     updated_incident = await incidents_col.find_one(query)
     updated_incident["id"] = str(updated_incident["_id"])
-    
+
     # Save into Hindsight persistent memory to make it searchable in future incidents
     await HindsightMemoryEngine.add_memory(updated_incident, update_data)
-    
+
     return updated_incident

@@ -30,6 +30,12 @@ const MemoryExplorer = () => {
   // Expanded item state
   const [expandedId, setExpandedId] = useState(null);
 
+  // Reflection state
+  const [reflectQuery, setReflectQuery] = useState('');
+  const [reflectAnswer, setReflectAnswer] = useState(null);
+  const [reflectSources, setReflectSources] = useState([]);
+  const [reflecting, setReflecting] = useState(false);
+
   const fetchMemories = async () => {
     try {
       setLoading(true);
@@ -53,10 +59,26 @@ const MemoryExplorer = () => {
     fetchMemories();
   };
 
-  // Compute memory statistics
   const totalCount = memories.length;
   const successCount = memories.filter(m => m.is_success !== false).length;
   const successRate = totalCount ? ((successCount / totalCount) * 100).toFixed(1) : "0.0";
+
+  const handleReflectSubmit = async (e) => {
+    e.preventDefault();
+    if (!reflectQuery.trim()) return;
+    try {
+      setReflecting(true);
+      const data = await memoryAPI.reflect(reflectQuery);
+      setReflectAnswer(data.answer);
+      setReflectSources(data.based_on || []);
+    } catch (err) {
+      console.error(err);
+      setReflectAnswer("Failed to synthesize answer.");
+      setReflectSources([]);
+    } finally {
+      setReflecting(false);
+    }
+  };
 
   return (
     <div className="space-y-6 pb-12">
@@ -101,7 +123,52 @@ const MemoryExplorer = () => {
         </div>
       </div>
 
-      {/* Query Filter and Search Controls */}
+      {/* Reflect & Synthesize Panel */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+        <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+          <BrainCircuit className="w-5 h-5 text-indigo-400" /> 
+          Reflect & Synthesize (Hindsight AI)
+        </h3>
+        <p className="text-sm text-slate-400 mb-4">
+          Ask a free-text question about past incidents. Hindsight will synthesize an answer based on historical memory.
+        </p>
+        <form onSubmit={handleReflectSubmit} className="flex gap-4">
+          <input 
+            type="text" 
+            value={reflectQuery}
+            onChange={(e) => setReflectQuery(e.target.value)}
+            placeholder="e.g. What should the on-call engineer know about recurring OOM issues?"
+            className="flex-1 bg-slate-800 border border-slate-700 text-white rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+          <button 
+            type="submit" 
+            disabled={reflecting || !reflectQuery.trim()}
+            className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white px-6 py-3 rounded-lg font-medium transition-colors flex items-center gap-2"
+          >
+            {reflecting ? 'Synthesizing...' : 'Synthesize'}
+          </button>
+        </form>
+        
+        {reflectAnswer && (
+          <div className="mt-6 p-5 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
+            <h4 className="text-indigo-400 font-semibold mb-2">Synthesized Answer:</h4>
+            <p className="text-slate-200 leading-relaxed whitespace-pre-wrap">{reflectAnswer}</p>
+            
+            {reflectSources && reflectSources.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-indigo-500/20">
+                <h5 className="text-xs text-indigo-400 uppercase tracking-wider mb-2">Based on memories:</h5>
+                <ul className="list-disc pl-5 text-sm text-slate-400 space-y-1">
+                  {reflectSources.map((source, i) => (
+                    <li key={i}>{typeof source === 'string' ? source : source.title || source.id || 'Memory snippet'}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Search & Filter Bar */}
       <div className="glass-card space-y-4">
         <form onSubmit={handleSearchSubmit} className="flex gap-4">
           <div className="relative flex-1">

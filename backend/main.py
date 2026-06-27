@@ -38,6 +38,8 @@ app.add_middleware(
 async def startup_event():
     print("Starting AI Incident Response Agent backend...")
     await test_db_connection()
+    from backend.memory.hindsight import init_hindsight
+    await init_hindsight()
 
 # Include routes
 app.include_router(auth.router)
@@ -47,10 +49,26 @@ app.include_router(reports.router)
 
 @app.get("/")
 def read_root():
+    from backend.memory.hindsight import hindsight_healthy
     return {
         "status": "online",
         "service": "AI Incident Response Agent API",
-        "hindsight": "active",
+        "hindsight": "active" if hindsight_healthy else "degraded",
+        "cascadeflow": "active"
+    }
+
+@app.get("/health")
+def health_check():
+    from backend.memory.hindsight import hindsight_healthy, HINDSIGHT_BASE_URL, HINDSIGHT_BANK_ID
+    from backend.database.db import use_mongodb
+    return {
+        "status": "healthy" if hindsight_healthy else "degraded",
+        "database": "connected" if use_mongodb else "offline_fallback",
+        "hindsight": {
+            "status": "connected" if hindsight_healthy else "offline_fallback",
+            "base_url": HINDSIGHT_BASE_URL,
+            "bank_id": HINDSIGHT_BANK_ID
+        },
         "cascadeflow": "active"
     }
 
